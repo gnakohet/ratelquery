@@ -14,7 +14,7 @@ pub use catalog::{list_databases, list_workgroups, schema};
 pub use errors::map_sdk_error;
 pub use model::{
     AthenaBucketCreated, AthenaQueryOptions, AthenaRowsResult, AthenaStarted, AthenaStats,
-    AthenaTestInfo, DEFAULT_CATALOG,
+    AthenaTestInfo, DEFAULT_CATALOG, RowsKind,
 };
 pub use output::{ResolvedOutput, create_output_bucket, resolve_output};
 pub use query::{cancel, start, wait};

@@ -49,10 +49,20 @@ pub struct AthenaStats {
     pub output_location: Option<String>,
 }
 
-/// A `RowsResult` (fields flattened) plus Athena statistics.
+/// The `kind` tag of a rows result. `QueryResult::Rows` gets it from its enum tag; an Athena
+/// result is sent on its own, so it carries the tag explicitly and the frontend reads both the
+/// same way (`kind === "rows"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RowsKind {
+    Rows,
+}
+
+/// A `RowsResult` (fields flattened, tagged `kind: "rows"`) plus Athena statistics.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AthenaRowsResult {
+    pub kind: RowsKind,
     #[serde(flatten)]
     pub rows: RowsResult,
     pub athena: AthenaStats,
@@ -67,6 +77,7 @@ mod tests {
     #[test]
     fn rows_result_is_flattened_with_athena_stats() {
         let result = AthenaRowsResult {
+            kind: RowsKind::Rows,
             rows: RowsResult {
                 columns: vec![ColumnInfo {
                     name: "n".into(),
@@ -91,6 +102,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(result).unwrap(),
             json!({
+                "kind": "rows",
                 "columns": [{ "name": "n", "typeName": "BIGINT", "table": null, "nullable": true }],
                 "rows": [[{ "t": "int", "v": "1" }]], "rowCount": 1, "truncated": false,
                 "elapsedMs": 7, "reconnected": false, "statement": "SELECT 1 AS n",

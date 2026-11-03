@@ -8,7 +8,7 @@ use aws_sdk_athena::types::{
 };
 
 use super::errors::map_sdk_error;
-use super::model::{AthenaQueryOptions, AthenaRowsResult, AthenaStarted, AthenaStats};
+use super::model::{AthenaQueryOptions, AthenaRowsResult, AthenaStarted, AthenaStats, RowsKind};
 use super::registry::AthenaHandle;
 use super::results::fetch_rows;
 use crate::error::{AppError, AppResult};
@@ -145,6 +145,7 @@ pub async fn wait(
     let execution = result?;
     let fetched = fetch_rows(handle, execution_id, max_rows).await?;
     Ok(AthenaRowsResult {
+        kind: RowsKind::Rows,
         rows: RowsResult {
             row_count: fetched.rows.len(),
             columns: fetched.columns,

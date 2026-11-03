@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, type KeyboardEvent } from "react"
+import { PanelErrorBoundary } from "../../components/ui"
 import type { QueryResult } from "../../lib/mysql"
 import type { ResultsView } from "../../lib/tabViews"
 import { useQueryOutputStore, type BottomPanel } from "../../state/queryOutputStore"
@@ -171,7 +172,10 @@ export function ResultsPanel({ tab, session }: ResultsPanelProps) {
         className="results__panel"
         hidden={panel !== "results"}
       >
-        <ResultsContent tab={tab} session={session} />
+        {/* A new run replaces the content, so it also clears a render error of the last one. */}
+        <PanelErrorBoundary key={tab.runId} label="Results">
+          <ResultsContent tab={tab} session={session} />
+        </PanelErrorBoundary>
       </div>
       {panel === "output" && (
         <div
@@ -180,7 +184,9 @@ export function ResultsPanel({ tab, session }: ResultsPanelProps) {
           aria-labelledby={tabElementId("output")}
           className="results__panel"
         >
-          <OutputView tabId={tab.id} connectionId={tab.connectionId} />
+          <PanelErrorBoundary label="Output">
+            <OutputView tabId={tab.id} connectionId={tab.connectionId} />
+          </PanelErrorBoundary>
         </div>
       )}
     </section>

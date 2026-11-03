@@ -1,6 +1,7 @@
 export { Button, type ButtonVariant } from "./Button"
 export { Dialog, isModalOpen } from "./Dialog"
 export { Menu, type MenuItem } from "./Menu"
+export { PanelErrorBoundary } from "./PanelErrorBoundary"
 export { SegmentedControl, type SegmentOption } from "./SegmentedControl"
 export { TextField } from "./TextField"
 export { Toaster } from "./Toaster"
