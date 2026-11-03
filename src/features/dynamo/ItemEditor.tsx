@@ -7,7 +7,7 @@ import type { KeySchema } from "../../lib/dynamo"
 import { diffItems, keyChanged, putExpectation } from "../../lib/dynamoDiff"
 import { findLossyAttributes, parseItem, type JsonMode } from "../../lib/dynamoJson"
 import type { DiscardIntent, DynamoTab, ItemEditorState } from "../../lib/dynamoTabs"
-import { formatShortcut, matchesShortcut } from "../../lib/shortcuts"
+import { formatShortcut, isImeComposing, matchesShortcut } from "../../lib/shortcuts"
 import { APP_SHORTCUTS, handleAppShortcut } from "../query/appShortcuts"
 import {
   backToEdit,
@@ -143,7 +143,10 @@ export function ItemEditor({ tab, editor, schema }: ItemEditorProps) {
 
   const onPanelKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
     // CodeMirror marks keys it handled (such as Esc closing its search panel) as default-prevented.
+    // The Esc that ends an IME composition reaches here unprevented (CodeMirror skips keyCode
+    // 229), and it belongs to the IME, not to the editor's close shortcut.
     if (event.defaultPrevented || isFromEditorPanel(event.target)) return
+    if (isImeComposing(event.nativeEvent)) return
     if (matchesShortcut(event, DYNAMO_SHORTCUTS.closeEditor)) {
       event.preventDefault()
       event.stopPropagation()
