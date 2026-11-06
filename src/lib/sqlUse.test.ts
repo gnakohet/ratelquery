@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { lastUseTarget, useTarget } from "./sqlUse"
+import { databasesWhileRunning, lastUseTarget, useTarget } from "./sqlUse"
 
 describe("useTarget", () => {
   it("reads the database of a USE statement in any case", () => {
@@ -40,5 +40,18 @@ describe("lastUseTarget", () => {
   it("is null when no statement switches", () => {
     expect(lastUseTarget([])).toBeNull()
     expect(lastUseTarget(["select 1", "show tables"])).toBeNull()
+  })
+})
+
+describe("databasesWhileRunning", () => {
+  it("gives each statement the database in effect when it ran", () => {
+    expect(
+      databasesWhileRunning(["select 1", "use b", "select 2", "USE c", "select 3"], "a"),
+    ).toEqual(["a", "a", "b", "b", "c"])
+  })
+
+  it("starts from no database and stays there without a USE", () => {
+    expect(databasesWhileRunning(["select 1", "show tables"], null)).toEqual([null, null])
+    expect(databasesWhileRunning([], "a")).toEqual([])
   })
 })

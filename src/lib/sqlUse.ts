@@ -17,6 +17,22 @@ export function useTarget(statement: string): string | null {
   return null
 }
 
+/**
+ * The database each of `statements` ran in, run one after another from `initial`: a `USE`
+ * changes it for the statements after it.
+ */
+export function databasesWhileRunning(
+  statements: readonly string[],
+  initial: string | null,
+): (string | null)[] {
+  let database = initial
+  return statements.map((statement) => {
+    const ran = database
+    database = useTarget(statement) ?? database
+    return ran
+  })
+}
+
 /** The database selected by the last `USE` among `statements`, or null when none switches. */
 export function lastUseTarget(statements: readonly string[]): string | null {
   for (let i = statements.length - 1; i >= 0; i -= 1) {
