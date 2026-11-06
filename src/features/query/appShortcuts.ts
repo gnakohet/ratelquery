@@ -2,7 +2,7 @@ import { dismissToast, showToast } from "../../components/ui"
 import { matchesShortcut, parseShortcut, type KeyLike, type Shortcut } from "../../lib/shortcuts"
 import { SLOT_COUNT } from "../../lib/tabGroups"
 import { formatZoom, stepZoom, ZOOM_SHORTCUTS, type ZoomAction } from "../../lib/zoom"
-import { useSettingsStore } from "../../state/settingsStore"
+import { applyUiZoom, useSettingsStore } from "../../state/settingsStore"
 import { selectActiveTab, useTabsStore } from "../../state/tabsStore"
 import { useUiStore } from "../../state/uiStore"
 import { reviewActiveEdit, runActiveDynamo } from "../dynamo/actions"
@@ -51,7 +51,8 @@ export function handleAppShortcut(event: KeyLike, context: ShortcutContext = {})
   const action = matchAppShortcut(event)
   if (!action) return false
   // A held key still belongs to the shortcut (so the editor doesn't type it), but runs once.
-  if (event.repeat) return true
+  // Zoom repeats like a browser's; its save is debounced, so that costs one write.
+  if (event.repeat && !isZoomAction(action)) return true
   runAppShortcut(action, context)
   return true
 }
@@ -68,12 +69,20 @@ export interface ZoomShortcut {
 
 export type AppShortcut = keyof typeof APP_SHORTCUTS | SlotShortcut | ZoomShortcut
 
+const isZoomAction = (action: AppShortcut): action is ZoomShortcut =>
+  typeof action === "object" && "zoom" in action
+
 function matchZoomShortcut(event: KeyLike): ZoomShortcut | null {
   const actions = Object.keys(ZOOM_SHORTCUTS) as ZoomAction[]
   const zoom = actions.find((action) =>
     ZOOM_SHORTCUTS[action].some((shortcut) => matchesShortcut(event, shortcut)),
   )
   return zoom ? { zoom } : null
+}
+
+/** Zoom keys work while a modal dialog is open (Settings hosts the zoom picker), unlike the rest. */
+export function isZoomShortcut(event: KeyLike): boolean {
+  return matchZoomShortcut(event) !== null
 }
 
 function matchSlotShortcut(event: KeyLike): SlotShortcut | null {
@@ -106,16 +115,49 @@ export function matchAppShortcut(event: KeyLike): AppShortcut | null {
 /** The toast showing the current zoom; replaced on each step so presses don't pile up. */
 let zoomToastId: number | null = null
 
-function runZoom(action: ZoomAction): void {
+/**
+ * Presses apply at once but save once, this long after the last: separate saves can finish out
+ * of order in the backend and leave the file at an older level.
+ */
+export const ZOOM_SAVE_DELAY_MS = 300
+
+/** The level applied but not saved yet, which the next press steps from. */
+let unsavedZoom: number | null = null
+let zoomSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+function saveZoom(): void {
+  zoomSaveTimer = null
+  const level = unsavedZoom
+  unsavedZoom = null
   const { settings, update } = useSettingsStore.getState()
-  const next = stepZoom(settings.uiZoom, action)
+  if (level !== null && level !== settings.uiZoom) void update({ uiZoom: level })
+}
+
+function runZoom(action: ZoomAction): void {
+  const { settings, status } = useSettingsStore.getState()
+  // Until the saved level has loaded, stepping would start from the default.
+  if (status !== "ready") return
+  const current = unsavedZoom ?? settings.uiZoom
+  const next = stepZoom(current, action)
   if (zoomToastId !== null) dismissToast(zoomToastId)
   zoomToastId = showToast({ tone: "info", message: `Zoom ${formatZoom(next)}` })
-  if (next !== settings.uiZoom) void update({ uiZoom: next })
+  if (next === current) return
+  unsavedZoom = next
+  applyUiZoom(next)
+  if (zoomSaveTimer !== null) clearTimeout(zoomSaveTimer)
+  zoomSaveTimer = setTimeout(saveZoom, ZOOM_SAVE_DELAY_MS)
+}
+
+/** Test seam: drops an unsaved zoom and its timer. */
+export function resetZoomShortcut(): void {
+  if (zoomSaveTimer !== null) clearTimeout(zoomSaveTimer)
+  zoomSaveTimer = null
+  unsavedZoom = null
+  zoomToastId = null
 }
 
 function runAppShortcut(action: AppShortcut, context: ShortcutContext): void {
-  if (typeof action === "object" && "zoom" in action) {
+  if (isZoomAction(action)) {
     runZoom(action.zoom)
     return
   }

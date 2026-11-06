@@ -1,13 +1,25 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useToastStore } from "../../components/ui/toastStore"
 import { setTransport } from "../../lib/ipc"
 import { INITIAL_TABS } from "../../lib/queryTabs"
 import { DEFAULT_SETTINGS, mergeSettings, type SettingsPatch } from "../../lib/settings"
 import { isMac, type KeyLike } from "../../lib/shortcuts"
-import { resetSettingsStore, useSettingsStore } from "../../state/settingsStore"
+import { applyUiZoom, resetSettingsStore, useSettingsStore } from "../../state/settingsStore"
 import { useTabsStore } from "../../state/tabsStore"
 import { useUiStore } from "../../state/uiStore"
-import { handleAppShortcut, matchAppShortcut } from "./appShortcuts"
+import {
+  handleAppShortcut,
+  isZoomShortcut,
+  matchAppShortcut,
+  resetZoomShortcut,
+  ZOOM_SAVE_DELAY_MS,
+} from "./appShortcuts"
+
+// The webview zoom needs the desktop shell; the tests only check which levels were applied.
+vi.mock("../../state/settingsStore", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../state/settingsStore")>()),
+  applyUiZoom: vi.fn(),
+}))
 
 function modKey(code: string, extra: Partial<KeyLike> = {}): KeyLike {
   const mac = isMac()
@@ -84,35 +96,104 @@ describe("handleAppShortcut", () => {
     expect(matchAppShortcut({ ...modKey("Equal"), metaKey: false, ctrlKey: false })).toBeNull()
   })
 
-  it("steps the zoom setting, saves it and shows one toast for the latest level", async () => {
+  it("tells zoom keys apart from the other shortcuts", () => {
+    expect(isZoomShortcut(modKey("Equal"))).toBe(true)
+    expect(isZoomShortcut(modKey("Minus"))).toBe(true)
+    expect(isZoomShortcut(modKey("Digit0"))).toBe(true)
+    expect(isZoomShortcut(modKey("Comma"))).toBe(false)
+    expect(isZoomShortcut(modKey("Digit1"))).toBe(false)
+  })
+})
+
+describe("zoom shortcuts", () => {
+  let saved: SettingsPatch[]
+  let restore: () => void
+  const uiZoom = () => useSettingsStore.getState().settings.uiZoom
+  const applied = () => vi.mocked(applyUiZoom).mock.calls.map(([level]) => level)
+  const toasts = () => useToastStore.getState().toasts.map((t) => t.message)
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.mocked(applyUiZoom).mockClear()
+    resetZoomShortcut()
     resetSettingsStore()
+    useSettingsStore.setState({ status: "ready" })
+    saved = []
     let stored = DEFAULT_SETTINGS
-    const saved: unknown[] = []
-    const restore = setTransport(async (command, args) => {
+    restore = setTransport(async (command, args) => {
       if (command !== "settings_set") throw { kind: "unknown", message: command }
-      saved.push(args?.settings)
-      stored = mergeSettings(stored, args?.settings as SettingsPatch)
+      const patch = args?.settings as SettingsPatch
+      saved = [...saved, patch]
+      stored = mergeSettings(stored, patch)
       return stored
     })
-    try {
-      handleAppShortcut(modKey("Equal"))
-      handleAppShortcut(modKey("Equal"))
-      expect(useSettingsStore.getState().settings.uiZoom).toBe(125)
-      expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual(["Zoom 125%"])
-      handleAppShortcut(modKey("Digit0"))
-      await vi.waitFor(() => expect(saved).toHaveLength(3))
-      expect(saved).toEqual([{ uiZoom: 110 }, { uiZoom: 125 }, { uiZoom: 100 }])
-      expect(useSettingsStore.getState().settings.uiZoom).toBe(100)
-    } finally {
-      restore()
-    }
   })
 
-  it("claims a zoom key at either end without saving again", () => {
-    resetSettingsStore()
+  afterEach(() => {
+    restore()
+    vi.useRealTimers()
+  })
+
+  it("applies each step at once, shows one toast and saves only the newest level", async () => {
+    handleAppShortcut(modKey("Equal"))
+    handleAppShortcut(modKey("Equal"))
+    expect(applied()).toEqual([110, 125])
+    expect(toasts()).toEqual(["Zoom 125%"])
+    await vi.advanceTimersByTimeAsync(ZOOM_SAVE_DELAY_MS - 1)
+    expect(saved).toEqual([])
+    // Another press pushes the save back again.
+    handleAppShortcut(modKey("Equal"))
+    await vi.advanceTimersByTimeAsync(ZOOM_SAVE_DELAY_MS - 1)
+    expect(saved).toEqual([])
+    expect(uiZoom()).toBe(100)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(saved).toEqual([{ uiZoom: 150 }])
+    expect(uiZoom()).toBe(150)
+    expect(toasts()).toEqual(["Zoom 150%"])
+  })
+
+  it("steps from the unsaved level and doesn't save one that ends where it started", async () => {
+    handleAppShortcut(modKey("Equal"))
+    handleAppShortcut(modKey("Minus"))
+    expect(applied()).toEqual([110, 100])
+    await vi.runAllTimersAsync()
+    expect(saved).toEqual([])
+    expect(uiZoom()).toBe(100)
+  })
+
+  it("resets to 100% from a saved level", async () => {
+    useSettingsStore.setState({ settings: { ...DEFAULT_SETTINGS, uiZoom: 150 } })
+    handleAppShortcut(modKey("Digit0"))
+    expect(applied()).toEqual([100])
+    await vi.runAllTimersAsync()
+    expect(saved).toEqual([{ uiZoom: 100 }])
+  })
+
+  it("claims a zoom key at either end without applying or saving again", async () => {
     useSettingsStore.setState({ settings: { ...DEFAULT_SETTINGS, uiZoom: 80 } })
     expect(handleAppShortcut(modKey("Minus"))).toBe(true)
-    expect(useSettingsStore.getState().settings.uiZoom).toBe(80)
-    expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual(["Zoom 80%"])
+    expect(toasts()).toEqual(["Zoom 80%"])
+    await vi.runAllTimersAsync()
+    expect(applied()).toEqual([])
+    expect(saved).toEqual([])
+    expect(uiZoom()).toBe(80)
+  })
+
+  it("claims a zoom key before the saved settings load but doesn't step from the defaults", async () => {
+    useSettingsStore.setState({ status: "loading" })
+    expect(handleAppShortcut(modKey("Equal"))).toBe(true)
+    await vi.runAllTimersAsync()
+    expect(applied()).toEqual([])
+    expect(toasts()).toEqual([])
+    expect(saved).toEqual([])
+  })
+
+  it("keeps zooming while the key is held", async () => {
+    expect(handleAppShortcut(modKey("Equal"))).toBe(true)
+    expect(handleAppShortcut(modKey("Equal", { repeat: true }))).toBe(true)
+    expect(handleAppShortcut(modKey("Equal", { repeat: true }))).toBe(true)
+    expect(applied()).toEqual([110, 125, 150])
+    await vi.runAllTimersAsync()
+    expect(saved).toEqual([{ uiZoom: 150 }])
   })
 })

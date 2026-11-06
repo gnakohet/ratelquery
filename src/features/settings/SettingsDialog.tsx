@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 import { Button, Dialog, SegmentedControl, type SegmentOption } from "../../components/ui"
 import type { SecretStore, SettingsPatch, ThemePreference } from "../../lib/settings"
 import { formatShortcut } from "../../lib/shortcuts"
-import { formatZoom, ZOOM_LEVELS, ZOOM_SHORTCUTS } from "../../lib/zoom"
+import { formatZoom, nearestZoomLevel, ZOOM_LEVELS, ZOOM_SHORTCUTS } from "../../lib/zoom"
 import { useSettingsStore } from "../../state/settingsStore"
 import { useUiStore } from "../../state/uiStore"
 import { NumberSetting } from "./NumberSetting"
@@ -85,9 +85,11 @@ function SettingsForm() {
         </div>
         <div className="ui-field">
           <span className="ui-field__label">Zoom</span>
+          {/* Snapped so a hand-edited level in between still checks one option and stays
+              reachable by Tab. */}
           <SegmentedControl
             label="Zoom"
-            value={String(settings.uiZoom)}
+            value={String(nearestZoomLevel(settings.uiZoom))}
             options={ZOOM_OPTIONS}
             onChange={(level) => save({ uiZoom: Number(level) })}
           />

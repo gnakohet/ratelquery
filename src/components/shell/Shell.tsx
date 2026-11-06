@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react"
+import { useEffect, useLayoutEffect, useState, type CSSProperties } from "react"
 import {
   ConnectionDialog,
   HostKeyPromptDialog,
@@ -9,6 +9,7 @@ import { DynamoWorkspace } from "../../features/dynamo"
 import { subscribeTreeCleanup, TableWorkspace } from "../../features/schema"
 import {
   handleAppShortcut,
+  isZoomShortcut,
   QueryWorkspace,
   RunConfirmDialog,
   subscribeConnectionCleanup,
@@ -19,7 +20,7 @@ import { ensureQueryOutputSync } from "../../state/queryOutputSync"
 import { subscribeSessionEvents } from "../../state/sessionsStore"
 import { applyEditorFontSize, applyUiZoom, useSettingsStore } from "../../state/settingsStore"
 import { useTabsStore } from "../../state/tabsStore"
-import { applyPlatformAttribute, applyTheme, useUiStore } from "../../state/uiStore"
+import { applyTheme, useUiStore } from "../../state/uiStore"
 import { startWorkspaceSync } from "../../state/workspaceSync"
 import { PANEL_SPECS } from "../../lib/panelWidths"
 import { isImeComposing } from "../../lib/shortcuts"
@@ -52,12 +53,11 @@ export function Shell() {
   useEffect(() => applyEditorFontSize(editorFontSize), [editorFontSize])
 
   // Waits for the saved settings: the defaults in use until then would undo the zoom the backend
-  // already applied at startup.
-  useEffect(() => {
+  // already applied at startup. A layout effect, so `--ui-zoom` is set before the sidebar toggle
+  // that first renders with it paints.
+  useLayoutEffect(() => {
     if (settingsReady) applyUiZoom(uiZoom)
   }, [settingsReady, uiZoom])
-
-  useEffect(() => applyPlatformAttribute(), [])
 
   // App-wide subscriptions and listeners live here, mounted once for the whole window.
   useNewConnectionShortcut()
@@ -80,10 +80,10 @@ export function Shell() {
     // The SQL editor handles these in its own capture phase and stops the event, so this
     // listener only sees shortcuts pressed elsewhere in the window. While a modal dialog is
     // open the page behind it is inert, so its shortcuts must not fire either (Esc belongs to
-    // the dialog and isn't an app shortcut).
+    // the dialog and isn't an app shortcut). Zoom is the exception: it scales the dialog too.
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isImeComposing(event)) return
-      if (event.code !== "Escape" && isModalOpen()) return
+      if (event.code !== "Escape" && isModalOpen() && !isZoomShortcut(event)) return
       if (handleAppShortcut(event)) event.preventDefault()
     }
     window.addEventListener("keydown", onKeyDown)
@@ -98,7 +98,8 @@ export function Shell() {
       style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
     >
       <Sidebar onAddConnection={() => openDialog()} inert={collapsed} />
-      <SidebarToggle />
+      {/* Placed by `--ui-zoom`, which is only known once the saved settings have loaded. */}
+      {settingsReady && <SidebarToggle />}
       {/* Not rendered while collapsed, so it can't be focused or dragged. */}
       {!collapsed && (
         <ResizeHandle

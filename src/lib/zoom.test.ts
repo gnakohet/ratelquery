@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { DEFAULT_ZOOM, formatZoom, stepZoom, ZOOM_LEVELS } from "./zoom"
+import { DEFAULT_ZOOM, formatZoom, nearestZoomLevel, stepZoom, ZOOM_LEVELS } from "./zoom"
 
 describe("stepZoom", () => {
   it("moves one level at a time", () => {
@@ -22,6 +22,24 @@ describe("stepZoom", () => {
   it("resets to the default from anywhere", () => {
     expect(stepZoom(175, "reset")).toBe(DEFAULT_ZOOM)
     expect(stepZoom(80, "reset")).toBe(100)
+  })
+})
+
+describe("nearestZoomLevel", () => {
+  it("keeps a level as it is", () => {
+    for (const level of ZOOM_LEVELS) expect(nearestZoomLevel(level)).toBe(level)
+  })
+
+  it("snaps a value between levels to the closer one, the lower on a tie", () => {
+    expect(nearestZoomLevel(130)).toBe(125)
+    expect(nearestZoomLevel(140)).toBe(150)
+    expect(nearestZoomLevel(105)).toBe(100)
+    expect(nearestZoomLevel(85)).toBe(80)
+  })
+
+  it("snaps a value past either end to that end", () => {
+    expect(nearestZoomLevel(50)).toBe(80)
+    expect(nearestZoomLevel(400)).toBe(175)
   })
 })
 

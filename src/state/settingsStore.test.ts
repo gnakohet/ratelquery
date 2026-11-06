@@ -46,6 +46,13 @@ class FakeSettingsBackend {
     this.pending = []
     pending.forEach((resolve) => resolve())
   }
+
+  /** Lets one held request through, by the order it arrived in, leaving the rest held. */
+  releaseOne(index: number) {
+    const resolve = this.pending[index]
+    this.pending = this.pending.filter((_, i) => i !== index)
+    resolve?.()
+  }
 }
 
 let backend: FakeSettingsBackend
@@ -167,6 +174,21 @@ describe("update", () => {
     expect(await saving).toBe(false)
     await loading
     expect(store().settings).toEqual(backend.stored)
+  })
+
+  it("doesn't flash back to an older pending change when saves answer out of order", async () => {
+    backend.hold = true
+    const first = store().update({ uiZoom: 110 })
+    const second = store().update({ uiZoom: 125 })
+    expect(store().settings.uiZoom).toBe(125)
+    backend.releaseOne(1)
+    expect(await second).toBe(true)
+    expect(store().settings.uiZoom).toBe(125)
+    expect(store().saved.uiZoom).toBe(125)
+    backend.releaseOne(0)
+    expect(await first).toBe(true)
+    expect(store().settings.uiZoom).toBe(125)
+    expect(store().saved.uiZoom).toBe(125)
   })
 
   it("refuses out-of-range values without calling the backend", async () => {

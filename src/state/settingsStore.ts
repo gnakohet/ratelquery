@@ -45,8 +45,14 @@ let savedSeq = 0
 let loadToken = 0
 let pending: readonly PendingPatch[] = []
 
+/**
+ * `base` with the patches still saving. One sent before the confirmed `saved` is already in it,
+ * or was overtaken by a newer save, so re-applying it would flash the older value back.
+ */
 const withPending = (base: Settings): Settings =>
-  pending.reduce((acc, entry) => mergeSettings(acc, entry.patch), base)
+  pending
+    .filter((entry) => entry.seq > savedSeq)
+    .reduce((acc, entry) => mergeSettings(acc, entry.patch), base)
 
 export const useSettingsStore = create<SettingsStore>((set, get) => {
   /** Records a backend response from request `seq` and re-applies the unsaved patches. */

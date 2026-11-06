@@ -1,7 +1,10 @@
+/* The sidebar column is capped at a share of the window, so at a high zoom a wide sidebar can't
+   squeeze the workspace out; the stored width stays as set. */
 .shell {
+  --sidebar-column: min(var(--sidebar-width), 35%);
   position: relative;
   display: grid;
-  grid-template-columns: var(--sidebar-width) 1fr;
+  grid-template-columns: var(--sidebar-column) 1fr;
   grid-template-rows: 1fr;
   height: 100%;
   background: var(--bg);
@@ -18,29 +21,33 @@
 }
 
 /* The sidebar toggle keeps the same place in both sidebar states and grows with the interface
-   zoom like the rest of the window. Its left edge is in screen points, divided by `--ui-zoom`
-   into CSS pixels, because the macOS traffic lights before it don't zoom: a plain CSS offset
-   would slide under them below 100%. Vertically it lines up with the traffic lights while it
-   fits, then stays just inside the window's top edge. */
+   zoom like the rest of the window. Without native window chrome it sits at the start of the
+   top row, centred like the sidebar header's buttons, and the header and the connection tabs
+   make room for it. On macOS it follows the traffic lights, which don't zoom: its left edge is
+   in screen points, divided by `--ui-zoom` into CSS pixels, so it never slides under them below
+   100%, and vertically it lines up with them while it fits, then stays just inside the window's
+   top edge. */
 .shell {
   --sidebar-toggle-left: 8px;
-  --sidebar-toggle-center: 14px;
 }
 
 :root[data-platform="macos"] .shell {
-  --sidebar-toggle-left: 76px;
-  --sidebar-toggle-center: 15.5px;
+  --sidebar-toggle-left: calc(76px / var(--ui-zoom, 1));
 }
 
 .shell__sidebar-toggle {
   position: absolute;
-  top: max(1px, var(--sidebar-toggle-center) / var(--ui-zoom, 1) - var(--icon-button-md) / 2);
-  left: calc(var(--sidebar-toggle-left) / var(--ui-zoom, 1));
+  top: calc((var(--tabbar-height) - var(--icon-button-md)) / 2);
+  left: var(--sidebar-toggle-left);
   z-index: 6;
 }
 
+:root[data-platform="macos"] .shell__sidebar-toggle {
+  top: max(1px, 15.5px / var(--ui-zoom, 1) - var(--icon-button-md) / 2);
+}
+
 .shell__resize {
-  left: calc(var(--sidebar-width) - 3px);
+  left: calc(var(--sidebar-column) - 3px);
 }
 
 .sidebar {
@@ -67,6 +74,11 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 10px 6px 14px;
+}
+
+/* Without the macOS title bar inset the header is the top row, where the sidebar toggle sits. */
+:root:not([data-platform="macos"]) .sidebar__header {
+  padding-left: calc(var(--sidebar-toggle-left) + var(--icon-button-md) + 6px);
 }
 
 .sidebar__title {
@@ -137,7 +149,7 @@
 /* Room for the sidebar toggle (and on macOS the traffic lights before it) when the sidebar
    that normally sits under them is hidden. */
 .shell[data-sidebar="collapsed"] .tabbar__row--connections {
-  padding-left: calc(var(--sidebar-toggle-left) / var(--ui-zoom, 1) + var(--icon-button-md) + 6px);
+  padding-left: calc(var(--sidebar-toggle-left) + var(--icon-button-md) + 6px);
 }
 
 /* A connection's colour, or a neutral one when it has none (`--conn` set inline). */
