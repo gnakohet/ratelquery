@@ -1,5 +1,8 @@
+import { dismissToast, showToast } from "../../components/ui"
 import { matchesShortcut, parseShortcut, type KeyLike, type Shortcut } from "../../lib/shortcuts"
 import { SLOT_COUNT } from "../../lib/tabGroups"
+import { formatZoom, stepZoom, ZOOM_SHORTCUTS, type ZoomAction } from "../../lib/zoom"
+import { useSettingsStore } from "../../state/settingsStore"
 import { selectActiveTab, useTabsStore } from "../../state/tabsStore"
 import { useUiStore } from "../../state/uiStore"
 import { reviewActiveEdit, runActiveDynamo } from "../dynamo/actions"
@@ -59,7 +62,19 @@ export interface SlotShortcut {
   slot: number
 }
 
-export type AppShortcut = keyof typeof APP_SHORTCUTS | SlotShortcut
+export interface ZoomShortcut {
+  zoom: ZoomAction
+}
+
+export type AppShortcut = keyof typeof APP_SHORTCUTS | SlotShortcut | ZoomShortcut
+
+function matchZoomShortcut(event: KeyLike): ZoomShortcut | null {
+  const actions = Object.keys(ZOOM_SHORTCUTS) as ZoomAction[]
+  const zoom = actions.find((action) =>
+    ZOOM_SHORTCUTS[action].some((shortcut) => matchesShortcut(event, shortcut)),
+  )
+  return zoom ? { zoom } : null
+}
 
 function matchSlotShortcut(event: KeyLike): SlotShortcut | null {
   for (const scope of ["tab", "connection"] as const) {
@@ -73,6 +88,8 @@ function matchSlotShortcut(event: KeyLike): SlotShortcut | null {
 export function matchAppShortcut(event: KeyLike): AppShortcut | null {
   const slot = matchSlotShortcut(event)
   if (slot) return slot
+  const zoom = matchZoomShortcut(event)
+  if (zoom) return zoom
   // Shift+Enter is checked before Enter so the longer combination wins.
   const order: readonly (keyof typeof APP_SHORTCUTS)[] = [
     "runSelection",
@@ -86,7 +103,22 @@ export function matchAppShortcut(event: KeyLike): AppShortcut | null {
   return order.find((name) => matchesShortcut(event, APP_SHORTCUTS[name])) ?? null
 }
 
+/** The toast showing the current zoom; replaced on each step so presses don't pile up. */
+let zoomToastId: number | null = null
+
+function runZoom(action: ZoomAction): void {
+  const { settings, update } = useSettingsStore.getState()
+  const next = stepZoom(settings.uiZoom, action)
+  if (zoomToastId !== null) dismissToast(zoomToastId)
+  zoomToastId = showToast({ tone: "info", message: `Zoom ${formatZoom(next)}` })
+  if (next !== settings.uiZoom) void update({ uiZoom: next })
+}
+
 function runAppShortcut(action: AppShortcut, context: ShortcutContext): void {
+  if (typeof action === "object" && "zoom" in action) {
+    runZoom(action.zoom)
+    return
+  }
   if (typeof action === "object") {
     const tabs = useTabsStore.getState()
     if (action.scope === "tab") tabs.activateTabSlot(action.slot)

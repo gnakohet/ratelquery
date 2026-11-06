@@ -17,7 +17,7 @@ import { SettingsDialog } from "../../features/settings"
 import { useConnectionsStore } from "../../state/connectionsStore"
 import { ensureQueryOutputSync } from "../../state/queryOutputSync"
 import { subscribeSessionEvents } from "../../state/sessionsStore"
-import { applyEditorFontSize, useSettingsStore } from "../../state/settingsStore"
+import { applyEditorFontSize, applyUiZoom, useSettingsStore } from "../../state/settingsStore"
 import { useTabsStore } from "../../state/tabsStore"
 import { applyPlatformAttribute, applyTheme, useUiStore } from "../../state/uiStore"
 import { startWorkspaceSync } from "../../state/workspaceSync"
@@ -27,12 +27,15 @@ import { isModalOpen, ResizeHandle, Toaster } from "../ui"
 import { ConnectionBanner } from "./ConnectionBanner"
 import { EmptyWorkspace } from "./EmptyWorkspace"
 import { Sidebar } from "./Sidebar"
+import { SidebarToggle } from "./SidebarToggle"
 import { TabBar } from "./TabBar"
 import "./shell.css"
 
 export function Shell() {
   const theme = useSettingsStore((s) => s.settings.theme)
   const editorFontSize = useSettingsStore((s) => s.settings.editorFontSize)
+  const uiZoom = useSettingsStore((s) => s.settings.uiZoom)
+  const settingsReady = useSettingsStore((s) => s.status === "ready")
   const collapsed = useUiStore((s) => s.sidebarCollapsed)
   const sidebarWidth = useUiStore((s) => s.panelWidths.sidebar)
   const setPanelWidth = useUiStore((s) => s.setPanelWidth)
@@ -47,6 +50,12 @@ export function Shell() {
   useEffect(() => applyTheme(theme), [theme])
 
   useEffect(() => applyEditorFontSize(editorFontSize), [editorFontSize])
+
+  // Waits for the saved settings: the defaults in use until then would undo the zoom the backend
+  // already applied at startup.
+  useEffect(() => {
+    if (settingsReady) applyUiZoom(uiZoom)
+  }, [settingsReady, uiZoom])
 
   useEffect(() => applyPlatformAttribute(), [])
 
@@ -89,6 +98,7 @@ export function Shell() {
       style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
     >
       <Sidebar onAddConnection={() => openDialog()} inert={collapsed} />
+      <SidebarToggle />
       {/* Not rendered while collapsed, so it can't be focused or dragged. */}
       {!collapsed && (
         <ResizeHandle

@@ -17,6 +17,28 @@
   transition: none;
 }
 
+/* The sidebar toggle keeps the same place in both sidebar states and grows with the interface
+   zoom like the rest of the window. Its left edge is in screen points, divided by `--ui-zoom`
+   into CSS pixels, because the macOS traffic lights before it don't zoom: a plain CSS offset
+   would slide under them below 100%. Vertically it lines up with the traffic lights while it
+   fits, then stays just inside the window's top edge. */
+.shell {
+  --sidebar-toggle-left: 8px;
+  --sidebar-toggle-center: 14px;
+}
+
+:root[data-platform="macos"] .shell {
+  --sidebar-toggle-left: 76px;
+  --sidebar-toggle-center: 15.5px;
+}
+
+.shell__sidebar-toggle {
+  position: absolute;
+  top: max(1px, var(--sidebar-toggle-center) / var(--ui-zoom, 1) - var(--icon-button-md) / 2);
+  left: calc(var(--sidebar-toggle-left) / var(--ui-zoom, 1));
+  z-index: 6;
+}
+
 .shell__resize {
   left: calc(var(--sidebar-width) - 3px);
 }
@@ -112,9 +134,10 @@
   box-shadow: inset 0 -2px 0 var(--conn);
 }
 
-/* Room for the macOS traffic lights when the sidebar that normally holds them is hidden. */
-:root[data-platform="macos"] .shell[data-sidebar="collapsed"] .tabbar__row--connections {
-  padding-left: 78px;
+/* Room for the sidebar toggle (and on macOS the traffic lights before it) when the sidebar
+   that normally sits under them is hidden. */
+.shell[data-sidebar="collapsed"] .tabbar__row--connections {
+  padding-left: calc(var(--sidebar-toggle-left) / var(--ui-zoom, 1) + var(--icon-button-md) + 6px);
 }
 
 /* A connection's colour, or a neutral one when it has none (`--conn` set inline). */
@@ -269,13 +292,6 @@
 
 .tabbar__spacer {
   flex: 1;
-}
-
-.tabbar__actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0 8px;
 }
 
 .workspace__main {

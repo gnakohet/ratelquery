@@ -1,7 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useToastStore } from "../../components/ui/toastStore"
+import { setTransport } from "../../lib/ipc"
 import { INITIAL_TABS } from "../../lib/queryTabs"
+import { DEFAULT_SETTINGS, mergeSettings, type SettingsPatch } from "../../lib/settings"
 import { isMac, type KeyLike } from "../../lib/shortcuts"
+import { resetSettingsStore, useSettingsStore } from "../../state/settingsStore"
 import { useTabsStore } from "../../state/tabsStore"
 import { useUiStore } from "../../state/uiStore"
 import { handleAppShortcut, matchAppShortcut } from "./appShortcuts"
@@ -37,7 +40,7 @@ describe("handleAppShortcut", () => {
       scope: "connection",
       slot: 3,
     })
-    expect(matchAppShortcut(modKey("Digit0"))).toBeNull()
+    expect(matchAppShortcut(modKey("Digit0"))).toEqual({ zoom: "reset" })
     expect(matchAppShortcut(modKey("Numpad1"))).toBeNull()
     expect(matchAppShortcut(modKey("Digit1", { shiftKey: true }))).toBeNull()
     expect(matchAppShortcut({ ...modKey("Digit1"), metaKey: false, ctrlKey: false })).toBeNull()
@@ -68,5 +71,48 @@ describe("handleAppShortcut", () => {
     expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual([
       "Open a connection from the sidebar first",
     ])
+  })
+
+  it("matches browser zoom keys by physical key", () => {
+    expect(matchAppShortcut(modKey("Equal"))).toEqual({ zoom: "in" })
+    expect(matchAppShortcut(modKey("Equal", { shiftKey: true }))).toEqual({ zoom: "in" })
+    expect(matchAppShortcut(modKey("NumpadAdd"))).toEqual({ zoom: "in" })
+    expect(matchAppShortcut(modKey("Minus"))).toEqual({ zoom: "out" })
+    expect(matchAppShortcut(modKey("NumpadSubtract"))).toEqual({ zoom: "out" })
+    expect(matchAppShortcut(modKey("Numpad0"))).toEqual({ zoom: "reset" })
+    expect(matchAppShortcut(modKey("Digit0", { altKey: true }))).toBeNull()
+    expect(matchAppShortcut({ ...modKey("Equal"), metaKey: false, ctrlKey: false })).toBeNull()
+  })
+
+  it("steps the zoom setting, saves it and shows one toast for the latest level", async () => {
+    resetSettingsStore()
+    let stored = DEFAULT_SETTINGS
+    const saved: unknown[] = []
+    const restore = setTransport(async (command, args) => {
+      if (command !== "settings_set") throw { kind: "unknown", message: command }
+      saved.push(args?.settings)
+      stored = mergeSettings(stored, args?.settings as SettingsPatch)
+      return stored
+    })
+    try {
+      handleAppShortcut(modKey("Equal"))
+      handleAppShortcut(modKey("Equal"))
+      expect(useSettingsStore.getState().settings.uiZoom).toBe(125)
+      expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual(["Zoom 125%"])
+      handleAppShortcut(modKey("Digit0"))
+      await vi.waitFor(() => expect(saved).toHaveLength(3))
+      expect(saved).toEqual([{ uiZoom: 110 }, { uiZoom: 125 }, { uiZoom: 100 }])
+      expect(useSettingsStore.getState().settings.uiZoom).toBe(100)
+    } finally {
+      restore()
+    }
+  })
+
+  it("claims a zoom key at either end without saving again", () => {
+    resetSettingsStore()
+    useSettingsStore.setState({ settings: { ...DEFAULT_SETTINGS, uiZoom: 80 } })
+    expect(handleAppShortcut(modKey("Minus"))).toBe(true)
+    expect(useSettingsStore.getState().settings.uiZoom).toBe(80)
+    expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual(["Zoom 80%"])
   })
 })

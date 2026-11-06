@@ -1,4 +1,5 @@
 import { isTauri } from "@tauri-apps/api/core"
+import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { create } from "zustand"
 import { showToast } from "../components/ui/toastStore"
 import { normalizeError } from "../lib/ipc"
@@ -125,6 +126,22 @@ export function currentSettings(): Settings {
 /** Mirrors the editor font size into the CSS variable both code editors read. */
 export function applyEditorFontSize(px: number): void {
   document.documentElement.style.setProperty("--editor-font-size", `${px}px`)
+}
+
+/**
+ * Scales the whole webview to `percent`. The backend applies the saved value before the first
+ * paint; this follows later changes. Outside the desktop shell there is no webview to zoom.
+ * `--ui-zoom` lets the sidebar toggle keep clear of the macOS traffic lights, which don't zoom.
+ */
+export function applyUiZoom(percent: number): void {
+  if (!isTauri()) return
+  document.documentElement.style.setProperty("--ui-zoom", String(percent / 100))
+  getCurrentWebview()
+    .setZoom(percent / 100)
+    .catch((raw: unknown) => {
+      const error = normalizeError(raw)
+      showToast({ tone: "error", message: "Couldn't change the zoom", detail: error.message })
+    })
 }
 
 /** Test seam: back to defaults and a fresh token state. */
