@@ -123,10 +123,18 @@ export function hidingFilters(goal: RevealTarget, tree: TreeState): TreeKey[] {
   })
 }
 
+/** A load as a reveal saw it when it started: an error of the same request counts only if it
+ *  was still running then. */
+interface LoadMark {
+  requestId: number | undefined
+  loading: boolean
+}
+
 /** What a reveal saw of its loads when it started, so an older failure doesn't end it. */
 export interface LoadMarks {
-  requestIds: Readonly<Record<TreeKey, number | undefined>>
+  loads: Readonly<Record<TreeKey, LoadMark>>
   dynamoError: AppError | null
+  dynamoLoading: boolean
 }
 
 type CatalogLoad = Pick<DynamoCatalog, "loading" | "error">
@@ -140,15 +148,22 @@ export function markLoads(
   tree: TreeState,
   dynamo: CatalogLoad | undefined,
 ): LoadMarks {
+  const catalog = dynamoFor(goal, dynamo)
+  const mark = (key: TreeKey): LoadMark => ({
+    requestId: tree.loads[key]?.requestId,
+    loading: tree.loads[key]?.status === "loading",
+  })
   return {
-    requestIds: Object.fromEntries(goal.expand.map((key) => [key, tree.loads[key]?.requestId])),
-    dynamoError: dynamoFor(goal, dynamo)?.error ?? null,
+    loads: Object.fromEntries(goal.expand.map((key) => [key, mark(key)])),
+    dynamoError: catalog?.error ?? null,
+    dynamoLoading: catalog?.loading ?? false,
   }
 }
 
 /**
  * Whether a load the row waits on failed, is still running, or neither. Only a failure of a
- * request started after `marks` counts: a node mounted by the reveal retries an older one.
+ * request running or started after `marks` counts: a node mounted by the reveal retries an
+ * older one.
  */
 export function loadStatus(
   goal: RevealTarget,
@@ -159,9 +174,12 @@ export function loadStatus(
   const catalog = dynamoFor(goal, dynamo)
   const failed = goal.expand.some((key) => {
     const load = tree.loads[key]
-    return load?.status === "error" && load.requestId !== marks.requestIds[key]
+    const mark = marks.loads[key]
+    return load?.status === "error" && (load.requestId !== mark?.requestId || mark.loading)
   })
-  if (failed || (catalog?.error && catalog.error !== marks.dynamoError)) return "failed"
+  const dynamoFailed =
+    catalog?.error != null && (catalog.error !== marks.dynamoError || marks.dynamoLoading)
+  if (failed || dynamoFailed) return "failed"
   const loading = goal.expand.some((key) => tree.loads[key]?.status === "loading")
   return loading || catalog?.loading ? "loading" : "settled"
 }
@@ -265,23 +283,36 @@ export function revealActiveTab(): void {
   if (found) reveal(found, true)
 }
 
+const settled = (status: string) => status === "ready" || status === "error"
+
 /**
  * While the setting is on, reveals the active tab (without taking focus or opening the
  * sidebar) whenever another tab becomes active, its database changes, or a session going live
- * lets a shortened reveal go further. Waits for the saved folder layout, whose changes are
- * ignored while it loads. Returns the unsubscribe function.
+ * lets a shortened reveal go further. Waits for the saved folder layout (whose changes are
+ * ignored while it loads) and the connection list. `show` stands in for the DOM work in tests.
+ * Returns the unsubscribe function.
  */
-export function subscribeAutoReveal(): () => void {
+export function subscribeAutoReveal(
+  show: (goal: RevealTarget) => void = (goal) => reveal(goal, false),
+): () => void {
+  let inputs: readonly unknown[] = []
   let last: string | null = null
   const check = () => {
-    const layout = useConnectionLayout.getState().status
-    if (layout === "idle" || layout === "loading") return
+    const layout = useConnectionLayout.getState()
+    const connections = useConnectionsStore.getState()
+    if (!settled(layout.status) || !settled(connections.status)) return
     const found = useSettingsStore.getState().settings.revealActiveTab ? activeTarget() : null
+    const activeId = useTabsStore.getState().activeId
+    const session = found && useSessionsStore.getState().sessions[found.connectionId]?.state
+    // Most store events (schema loads, runs, typing) change none of what the goal depends on.
+    const next = [found?.row, activeId, session, layout.layout, connections.connections]
+    if (next.every((value, index) => value === inputs[index])) return
+    inputs = next
     const goal = found && followGoal(found)
-    const signature = found && `${useTabsStore.getState().activeId}\u0000${goal?.row ?? ""}`
+    const signature = found && `${activeId}\u0000${goal?.row ?? ""}`
     if (signature === last) return
     last = signature
-    if (goal) reveal(goal, false)
+    if (goal) show(goal)
   }
   const offs = [
     useSettingsStore.subscribe(check),
@@ -289,6 +320,7 @@ export function subscribeAutoReveal(): () => void {
     useSessionsStore.subscribe(check),
     useAthenaStore.subscribe(check),
     useConnectionLayout.subscribe(check),
+    useConnectionsStore.subscribe(check),
   ]
   check()
   return () => {

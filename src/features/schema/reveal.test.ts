@@ -1,8 +1,15 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { emptyAthenaCatalog } from "../../lib/athenaCatalog"
+import { EMPTY_LAYOUT } from "../../lib/connectionLayout"
+import type { ConnectionConfig } from "../../lib/connections"
 import { selectTable, createDynamoTab } from "../../lib/dynamoTabs"
-import { createTab, createTableTab } from "../../lib/queryTabs"
-import { emptySession } from "../../state/sessionsStore"
+import { createTab, createTableTab, INITIAL_TABS } from "../../lib/queryTabs"
+import { DEFAULT_SETTINGS } from "../../lib/settings"
+import { useConnectionLayout } from "../../state/connectionLayoutStore"
+import { useConnectionsStore } from "../../state/connectionsStore"
+import { emptySession, useSessionsStore } from "../../state/sessionsStore"
+import { useSettingsStore } from "../../state/settingsStore"
+import { useTabsStore } from "../../state/tabsStore"
 import type { AppError } from "../../lib/ipc"
 import type { MysqlSessionState } from "../../lib/mysql"
 import {
@@ -11,6 +18,7 @@ import {
   loadStatus,
   markLoads,
   revealTarget,
+  subscribeAutoReveal,
   type GoalContext,
   type RevealTarget,
 } from "./reveal"
@@ -25,6 +33,7 @@ import {
   startLoad,
   type TreeState,
 } from "./treeState"
+import { useSchemaTree } from "./treeStore"
 
 const app = databaseKey("conn", "app")
 const users = childKey(app, "users")
@@ -179,6 +188,15 @@ describe("loadStatus", () => {
     expect(loadStatus(table, again, undefined, marks)).toBe("failed")
   })
 
+  it("counts the failure of a load that was already running when the reveal started", () => {
+    const running = startLoad(loaded(INITIAL_TREE, "conn"), app)
+    const marks = markLoads(table, running, undefined)
+    expect(loadStatus(table, running, undefined, marks)).toBe("loading")
+    const requestId = running.loads[app].requestId
+    const broken = failLoad(running, app, requestId, offline)
+    expect(loadStatus(table, broken, undefined, marks)).toBe("failed")
+  })
+
   it("watches the DynamoDB table list only when the row sits under the connection", () => {
     const dynamoTable: RevealTarget = {
       connectionId: "conn",
@@ -197,5 +215,99 @@ describe("loadStatus", () => {
     expect(loadStatus(dynamoTable, INITIAL_TREE, broken, staleMarks)).toBe("settled")
     const connMarks = markLoads(connectionOnly, INITIAL_TREE, clean)
     expect(loadStatus(connectionOnly, INITIAL_TREE, broken, connMarks)).toBe("settled")
+    // A list that was loading at the start and then failed is a fresh failure.
+    const runningMarks = markLoads(dynamoTable, INITIAL_TREE, { loading: true, error: null })
+    expect(loadStatus(dynamoTable, INITIAL_TREE, broken, runningMarks)).toBe("failed")
+  })
+})
+
+describe("subscribeAutoReveal", () => {
+  const mysql: ConnectionConfig = {
+    kind: "mysql",
+    id: "conn",
+    name: "conn",
+    host: "localhost",
+    port: 3306,
+    user: "root",
+  }
+  const revealed: RevealTarget[] = []
+  let stop = () => {}
+
+  const follow = () => {
+    stop = subscribeAutoReveal((goal) => revealed.push(goal))
+  }
+  const setSession = (state: MysqlSessionState) =>
+    useSessionsStore.setState({ sessions: { conn: { ...emptySession(), state } } })
+  const enable = (revealActiveTab: boolean) =>
+    useSettingsStore.setState({ settings: { ...DEFAULT_SETTINGS, revealActiveTab } })
+
+  beforeEach(() => {
+    revealed.length = 0
+    enable(true)
+    useTabsStore.setState({ ...INITIAL_TABS })
+    useSchemaTree.setState({ ...INITIAL_TREE })
+    useConnectionLayout.setState({ layout: EMPTY_LAYOUT, status: "ready" })
+    useConnectionsStore.setState({ connections: [mysql], status: "ready" })
+    setSession("connected")
+  })
+
+  afterEach(() => stop())
+
+  it("follows tab and database switches, and nothing else", () => {
+    follow()
+    const first = useTabsStore.getState().open("conn", "app")
+    expect(revealed.map((g) => g.row)).toEqual([app])
+    const second = useTabsStore.getState().open("conn", "app")
+    expect(revealed).toHaveLength(2)
+    useTabsStore.getState().setDatabase(second, "shop")
+    expect(revealed.at(-1)?.row).toBe(databaseKey("conn", "shop"))
+    useTabsStore.getState().activate(first)
+    expect(revealed.at(-1)?.row).toBe(app)
+    // A schema load or the editor text changes nothing the reveal depends on.
+    useSessionsStore.setState((s) => ({
+      sessions: { conn: { ...s.sessions.conn, schemaLoading: { app: true } } },
+    }))
+    useTabsStore.getState().setSql(first, "select 1")
+    expect(revealed).toHaveLength(4)
+  })
+
+  it("does nothing while the setting is off and reveals once it is turned on", () => {
+    enable(false)
+    follow()
+    useTabsStore.getState().open("conn", "app")
+    expect(revealed).toEqual([])
+    enable(true)
+    expect(revealed.map((g) => g.row)).toEqual([app])
+  })
+
+  it("waits for the saved folder layout", () => {
+    useConnectionLayout.setState({ status: "loading" })
+    follow()
+    useTabsStore.getState().open("conn", "app")
+    expect(revealed).toEqual([])
+    useConnectionLayout.setState({ status: "ready" })
+    expect(revealed.map((g) => g.row)).toEqual([app])
+  })
+
+  it("waits for the connection list when it loads after the tabs", () => {
+    useConnectionsStore.setState({ connections: [], status: "loading" })
+    follow()
+    useTabsStore.getState().open("conn", "app")
+    expect(revealed).toEqual([])
+    useConnectionsStore.setState({ connections: [mysql], status: "ready" })
+    expect(revealed.map((g) => g.row)).toEqual([app])
+  })
+
+  it("reveals the rest once the session goes live", () => {
+    setSession("disconnected")
+    follow()
+    useTabsStore.getState().open("conn", "app")
+    expect(revealed.map((g) => g.row)).toEqual(["conn"])
+    setSession("error")
+    expect(revealed).toHaveLength(1)
+    setSession("connected")
+    expect(revealed.map((g) => g.row)).toEqual(["conn", app])
+    setSession("connected")
+    expect(revealed).toHaveLength(2)
   })
 })
