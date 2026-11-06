@@ -1,22 +1,26 @@
+import { isModalOpen } from "../../components/ui"
 import type { AthenaCatalog } from "../../lib/athenaCatalog"
 import { expandFoldersAround } from "../../lib/connectionLayout"
-import type { ConnectionId } from "../../lib/connections"
+import type { ConnectionConfig, ConnectionId } from "../../lib/connections"
+import type { AppError } from "../../lib/ipc"
+import type { MysqlSessionState } from "../../lib/mysql"
 import type { WorkspaceTab } from "../../lib/queryTabs"
 import { useAthenaStore } from "../../state/athenaStore"
-import { useConnectionLayout } from "../../state/connectionLayoutStore"
+import { currentLayout, useConnectionLayout } from "../../state/connectionLayoutStore"
 import { useConnectionsStore } from "../../state/connectionsStore"
 import { useSessionsStore, type MysqlSession } from "../../state/sessionsStore"
 import { useSettingsStore } from "../../state/settingsStore"
 import { selectActiveTab, useTabsStore } from "../../state/tabsStore"
 import { useUiStore } from "../../state/uiStore"
-import { useDynamoCatalog } from "../dynamo/catalogStore"
+import { isMysqlSessionLive } from "../connections/connectSession"
+import { useDynamoCatalog, type DynamoCatalog } from "../dynamo/catalogStore"
 import { athenaTabDatabase, tabDatabase } from "../query/editing"
-import { needsMysqlSession } from "../query/mysqlSession"
 import {
   childKey,
   connectionKey,
   databaseKey,
   filterChildren,
+  isDescendant,
   needsLoad,
   type TreeKey,
   type TreeState,
@@ -67,23 +71,99 @@ export function revealTarget(
   }
 }
 
-/**
- * `reveal` cut short at the first node whose children were never loaded, so revealing it
- * starts no load (for a MySQL connection, no connect and no password prompt).
- */
-export function loadedPart(reveal: RevealTarget, tree: TreeState): RevealTarget {
-  const index = reveal.expand.findIndex((key) => needsLoad(tree, key))
-  if (index === -1) return reveal
-  return { ...reveal, expand: reveal.expand.slice(0, index), row: reveal.expand[index] }
+/** What decides how far a reveal may go without connecting. */
+export interface GoalContext {
+  /** The shortcut: it may connect (and prompt), like a click on the chevron. */
+  focus: boolean
+  /** Undefined while the connection isn't in the list. */
+  kind: ConnectionConfig["kind"] | undefined
+  /** The MySQL session's state; ignored for other kinds. */
+  session: MysqlSessionState | undefined
+  /** True when the connection sits in a collapsed folder, so its row isn't mounted. */
+  folded: boolean
+  tree: TreeState
 }
 
-/** The node whose filter text hides the row, if any. */
-export function hidingFilter(reveal: RevealTarget, tree: TreeState): TreeKey | null {
-  const parent = reveal.expand.at(-1)
-  const query = parent === undefined ? "" : (tree.filters[parent] ?? "")
-  if (parent === undefined || !query.trim()) return null
-  const name = reveal.row.slice(parent.length + 1)
-  return filterChildren([{ name, kind: "table" }], query).length === 0 ? parent : null
+/** True when mounting `key`'s children, or an expanded node under it, starts a load. */
+function mountLoads(tree: TreeState, key: TreeKey): boolean {
+  if (needsLoad(tree, key)) return true
+  return Object.entries(tree.expanded).some(
+    ([node, open]) => open && isDescendant(node, key) && needsLoad(tree, node),
+  )
+}
+
+/**
+ * How much of `found` to reveal. Following tabs never connects a MySQL session that isn't live
+ * (a connect may ask for a password): the reveal stops above the first node that would mount a
+ * load, counting the nodes already expanded below it, and is skipped when even un-collapsing
+ * the folders around the connection would. Null reveals nothing.
+ */
+export function goalFor(found: RevealTarget, context: GoalContext): RevealTarget | null {
+  const { focus, kind, session, folded, tree } = context
+  if (focus) return found
+  if (kind === undefined) return null
+  if (kind !== "mysql" || isMysqlSessionLive(session)) return found
+  const root = connectionKey(found.connectionId)
+  if (folded && tree.expanded[root] && mountLoads(tree, root)) return null
+  const index = found.expand.findIndex(
+    (key) => needsLoad(tree, key) || (!tree.expanded[key] && mountLoads(tree, key)),
+  )
+  if (index === -1) return found
+  return { ...found, expand: found.expand.slice(0, index), row: found.expand[index] }
+}
+
+/** Every node along the path whose filter text hides the next node, outermost first. */
+export function hidingFilters(goal: RevealTarget, tree: TreeState): TreeKey[] {
+  const path = [...goal.expand, goal.row]
+  return goal.expand.filter((parent, index) => {
+    const query = tree.filters[parent] ?? ""
+    if (!query.trim()) return false
+    const name = path[index + 1].slice(parent.length + 1)
+    return filterChildren([{ name, kind: "table" }], query).length === 0
+  })
+}
+
+/** What a reveal saw of its loads when it started, so an older failure doesn't end it. */
+export interface LoadMarks {
+  requestIds: Readonly<Record<TreeKey, number | undefined>>
+  dynamoError: AppError | null
+}
+
+type CatalogLoad = Pick<DynamoCatalog, "loading" | "error">
+
+/** The DynamoDB table list counts only when the row sits under the connection. */
+const dynamoFor = (goal: RevealTarget, dynamo: CatalogLoad | undefined) =>
+  goal.expand.includes(connectionKey(goal.connectionId)) ? dynamo : undefined
+
+export function markLoads(
+  goal: RevealTarget,
+  tree: TreeState,
+  dynamo: CatalogLoad | undefined,
+): LoadMarks {
+  return {
+    requestIds: Object.fromEntries(goal.expand.map((key) => [key, tree.loads[key]?.requestId])),
+    dynamoError: dynamoFor(goal, dynamo)?.error ?? null,
+  }
+}
+
+/**
+ * Whether a load the row waits on failed, is still running, or neither. Only a failure of a
+ * request started after `marks` counts: a node mounted by the reveal retries an older one.
+ */
+export function loadStatus(
+  goal: RevealTarget,
+  tree: TreeState,
+  dynamo: CatalogLoad | undefined,
+  marks: LoadMarks,
+): "failed" | "loading" | "settled" {
+  const catalog = dynamoFor(goal, dynamo)
+  const failed = goal.expand.some((key) => {
+    const load = tree.loads[key]
+    return load?.status === "error" && load.requestId !== marks.requestIds[key]
+  })
+  if (failed || (catalog?.error && catalog.error !== marks.dynamoError)) return "failed"
+  const loading = goal.expand.some((key) => tree.loads[key]?.status === "loading")
+  return loading || catalog?.loading ? "loading" : "settled"
 }
 
 /** How long a reveal waits for its row once nothing it depends on is loading any more. */
@@ -94,6 +174,8 @@ let current = 0
 
 const tree = () => useSchemaTree.getState()
 
+const dynamoCatalog = (id: ConnectionId) => useDynamoCatalog.getState().catalogs[id]
+
 function activeTarget(): RevealTarget | null {
   return revealTarget(
     selectActiveTab(useTabsStore.getState()),
@@ -102,59 +184,77 @@ function activeTarget(): RevealTarget | null {
   )
 }
 
-/** Whether a load the row waits on failed, is still running, or neither. */
-function loadStatus(reveal: RevealTarget): "failed" | "loading" | "settled" {
-  const loads = tree().loads
-  const dynamo = useDynamoCatalog.getState().catalogs[reveal.connectionId]
-  const states = reveal.expand.map((key) => loads[key]?.status)
-  if (states.includes("error") || dynamo?.error) return "failed"
-  if (states.includes("loading") || dynamo?.loading) return "loading"
-  return "settled"
+/** The goal for the active tab when following tabs, which never connects. */
+function followGoal(found: RevealTarget): RevealTarget | null {
+  const id = found.connectionId
+  const layout = currentLayout()
+  return goalFor(found, {
+    focus: false,
+    kind: useConnectionsStore.getState().byId(id)?.kind,
+    session: useSessionsStore.getState().sessions[id]?.state,
+    folded: expandFoldersAround(layout, id) !== layout,
+    tree: tree(),
+  })
 }
 
 function findRow(key: TreeKey): HTMLElement | null {
+  // The sidebar's connection tree (`ConnectionList`) is the only place a reveal looks.
+  const list = document.querySelector("[data-schema-tree]")
+  if (!list) return null
   // Tree keys hold NUL characters, which an attribute selector can't match.
-  const rows = document.querySelectorAll<HTMLElement>("[data-tree-key]")
+  const rows = list.querySelectorAll<HTMLElement>("[data-tree-key]")
   return [...rows].find((row) => row.dataset.treeKey === key) ?? null
+}
+
+function show(row: HTMLElement, key: TreeKey, focus: boolean): void {
+  // A collapsed sidebar is zero wide; scrolling inside it would only shift it sideways.
+  if (!useUiStore.getState().sidebarCollapsed) {
+    ;(row.firstElementChild ?? row).scrollIntoView({ block: "nearest" })
+  }
+  tree().setFocused(key)
+  if (focus) row.focus({ preventScroll: true })
 }
 
 /**
  * Expands everything above the row (folders included), waits for lazily loaded levels to
  * render it, scrolls it into view and makes it the tree's tab stop; `focus` also opens a
- * collapsed sidebar and moves focus to the row. Gives up quietly when a load fails or the row
- * never shows (deleted, or hidden by the connection filter).
+ * collapsed sidebar and moves focus to the row. When a load fails or the row never shows
+ * (deleted, or hidden by the connection filter), the deepest ancestor that did render gets
+ * the same treatment instead.
  */
-function reveal(found: RevealTarget, focus: boolean): void {
+function reveal(goal: RevealTarget, focus: boolean): void {
   const run = ++current
-  const mysql = useConnectionsStore.getState().byId(found.connectionId)?.kind === "mysql"
-  // Following tabs must not connect (and maybe prompt); the shortcut may, like a click.
-  const goal =
-    !focus && mysql && needsMysqlSession(found.connectionId) ? loadedPart(found, tree()) : found
   const ui = useUiStore.getState()
   if (focus && ui.sidebarCollapsed) ui.toggleSidebar()
   useConnectionLayout.getState().update((layout) => expandFoldersAround(layout, goal.connectionId))
-  const filtered = hidingFilter(goal, tree())
-  if (filtered !== null) tree().setFilter(filtered, "")
+  for (const key of hidingFilters(goal, tree())) tree().setFilter(key, "")
+  const marks = markLoads(goal, tree(), dynamoCatalog(goal.connectionId))
   tree().expandAll(goal.expand)
 
+  // The sidebar stays inert until the render that opens it.
+  const ready = (row: HTMLElement | null): row is HTMLElement =>
+    row !== null && !(focus && row.closest("[inert]"))
+  const fallBack = () => {
+    const key = [...goal.expand].reverse().find((k) => ready(findRow(k)))
+    const row = key === undefined ? null : findRow(key)
+    if (key !== undefined && row) show(row, key, focus)
+  }
   let deadline = performance.now() + WAIT_MS
   const step = () => {
     if (run !== current) return
-    const status = loadStatus(goal)
-    if (status === "failed") return
-    if (status === "loading") deadline = performance.now() + WAIT_MS
-    const row = findRow(goal.row)
-    // The sidebar stays inert until the render that opens it.
-    if (row && !(focus && row.closest("[inert]"))) {
-      // A collapsed sidebar is zero wide; scrolling inside it would only shift it sideways.
-      if (!useUiStore.getState().sidebarCollapsed) {
-        ;(row.firstElementChild ?? row).scrollIntoView({ block: "nearest" })
-      }
-      tree().setFocused(goal.row)
-      if (focus) row.focus({ preventScroll: true })
+    // A dialog (such as the password prompt) holds the window; look again once it closes.
+    if (isModalOpen()) {
+      deadline = performance.now() + WAIT_MS
+      requestAnimationFrame(step)
       return
     }
+    const status = loadStatus(goal, tree(), dynamoCatalog(goal.connectionId), marks)
+    if (status === "failed") return fallBack()
+    if (status === "loading") deadline = performance.now() + WAIT_MS
+    const row = findRow(goal.row)
+    if (ready(row)) return show(row, goal.row, focus)
     if (performance.now() < deadline) requestAnimationFrame(step)
+    else fallBack()
   }
   step()
 }
@@ -167,23 +267,28 @@ export function revealActiveTab(): void {
 
 /**
  * While the setting is on, reveals the active tab (without taking focus or opening the
- * sidebar) whenever another tab becomes active or its database changes. Returns the
- * unsubscribe function.
+ * sidebar) whenever another tab becomes active, its database changes, or a session going live
+ * lets a shortened reveal go further. Waits for the saved folder layout, whose changes are
+ * ignored while it loads. Returns the unsubscribe function.
  */
 export function subscribeAutoReveal(): () => void {
   let last: string | null = null
   const check = () => {
+    const layout = useConnectionLayout.getState().status
+    if (layout === "idle" || layout === "loading") return
     const found = useSettingsStore.getState().settings.revealActiveTab ? activeTarget() : null
-    const signature = found && `${useTabsStore.getState().activeId}\u0000${found.row}`
+    const goal = found && followGoal(found)
+    const signature = found && `${useTabsStore.getState().activeId}\u0000${goal?.row ?? ""}`
     if (signature === last) return
     last = signature
-    if (found) reveal(found, false)
+    if (goal) reveal(goal, false)
   }
   const offs = [
     useSettingsStore.subscribe(check),
     useTabsStore.subscribe(check),
     useSessionsStore.subscribe(check),
     useAthenaStore.subscribe(check),
+    useConnectionLayout.subscribe(check),
   ]
   check()
   return () => {

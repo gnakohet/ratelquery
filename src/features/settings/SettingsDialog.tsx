@@ -20,7 +20,7 @@ const SECRET_STORE_OPTIONS: readonly SegmentOption<SecretStore>[] = [
   { value: "file", label: "App file" },
 ]
 
-const REVEAL_HINT = `Expands the connection, database or table of the tab you switch to. ${formatShortcut(APP_SHORTCUTS.revealInSidebar)} reveals and focuses it at any time.`
+const REVEAL_HINT = `Expands the connection, database or table of the tab you switch to, opening collapsed folders on the way. ${formatShortcut(APP_SHORTCUTS.revealInSidebar)} reveals and focuses it at any time.`
 
 const SECRET_STORE_HINTS: Record<SecretStore, string> = {
   keychain:
