@@ -103,6 +103,37 @@ describe("run", () => {
     expect(queries[1].args?.options).toEqual({ maxRows: 1000 })
   })
 
+  it("follows a USE in what ran with the Database picker, keeping the results' database", async () => {
+    const useResult: QueryResult = {
+      kind: "exec",
+      affectedRows: 0,
+      lastInsertId: null,
+      elapsedMs: 1,
+      reconnected: false,
+      statement: "use `Shop`",
+    }
+    queryResults = [useResult, { ...usersResult("a@x"), statement: "show tables" }]
+    const store = useTabsStore.getState()
+    const id = store.open("c1", null)
+    await expect(useTabsStore.getState().run(id, "use `Shop`;\nshow tables;")).resolves.toBe("ran")
+    const tab = () => useTabsStore.getState().tabs.find((t) => t.id === id) as QueryTab
+    expect(tab()).toMatchObject({ database: "Shop", ranDatabase: null })
+
+    await useTabsStore.getState().run(id, "show tables")
+    const queries = calls.filter((c) => c.command === "mysql_query")
+    expect(queries[1].args?.options).toEqual({ maxRows: 1000, database: "Shop" })
+  })
+
+  it("leaves the Database picker alone when nothing switched or the run failed", async () => {
+    queryResults = [usersResult("a@x")]
+    const store = useTabsStore.getState()
+    const id = store.open("c1", "app")
+    await useTabsStore.getState().run(id, "select id, email from users")
+    expect((useTabsStore.getState().tabs.find((t) => t.id === id) as QueryTab).database).toBe("app")
+    await useTabsStore.getState().run(id, "use other; bad sql")
+    expect((useTabsStore.getState().tabs.find((t) => t.id === id) as QueryTab).database).toBe("app")
+  })
+
   it("runs an explicit statement and records failures", async () => {
     const id = useTabsStore.getState().open("c1", null)
     await expect(useTabsStore.getState().run(id, "bad sql")).resolves.toBe("failed")

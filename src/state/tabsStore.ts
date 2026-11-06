@@ -45,6 +45,7 @@ import {
   slotGroupTab,
   slotTab,
 } from "../lib/tabGroups"
+import { lastUseTarget } from "../lib/sqlUse"
 import { mergeRestoredTabs } from "../lib/workspace"
 import { useAthenaStore } from "./athenaStore"
 import { runAthenaStatements } from "./athenaRun"
@@ -330,6 +331,11 @@ export const useTabsStore = create<TabsStore>((set, get) => {
         logRunResults(tab.connectionId, id, results)
         noteReconnects(tab.connectionId, results)
         loadEditSchemas(tab.connectionId, results, ranDatabase)
+        // A `USE` in what ran moves the Database picker, so the next run sends that database
+        // instead of landing on a pooled connection that never saw the `USE`. These results
+        // keep `ranDatabase`: editing must not retarget rows read before the switch.
+        const switched = lastUseTarget(results.map((r) => r.statement))
+        if (switched !== null && switched !== ranDatabase) get().setDatabase(id, switched)
         return "ran"
       } catch (raw) {
         const error = normalizeError(raw)
