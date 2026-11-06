@@ -1,9 +1,8 @@
 /* DynamoDB table browser. Shares buttons, toolbar, menu and run-line styles with query.css. */
 
-/* The tables list and the item panel are capped at a share of the space they have, so at a
-   high zoom the items grid keeps a usable width; the stored widths stay as set. */
+/* `--dyn-tables-column` and `--dyn-side-column` (set inline) cap the stored widths at a share of
+   the space each panel has, so at a high zoom the items grid keeps a usable width. */
 .dyn {
-  --dyn-tables-column: min(var(--dyn-tables-width, 220px), 35%);
   position: relative;
   flex: 1;
   min-height: 0;
@@ -23,7 +22,6 @@
 }
 
 .dyn-body {
-  --dyn-side-column: min(var(--dyn-side-width, 400px), 45%);
   position: relative;
   flex: 1;
   min-height: 0;

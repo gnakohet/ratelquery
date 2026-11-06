@@ -36,9 +36,8 @@ interface PendingPatch {
 }
 
 /**
- * Every request (load or save) takes the next sequence number when it is sent. A response
- * becomes `saved` only when it is newer than the one already there, so a slow `settings_get`
- * can't replace what a later save confirmed.
+ * Every request (load or save) takes the next sequence number when it is made. A response
+ * becomes `saved` only when it is newer than the one already there.
  */
 let requestSeq = 0
 let savedSeq = 0
@@ -46,13 +45,20 @@ let loadToken = 0
 let pending: readonly PendingPatch[] = []
 
 /**
- * `base` with the patches still saving. One sent before the confirmed `saved` is already in it,
- * or was overtaken by a newer save, so re-applying it would flash the older value back.
+ * Requests reach the backend one after another: two `settings_set` calls in flight can finish
+ * there out of order and leave the file at the older one. So each answer already holds every
+ * earlier change, and the patches still pending are exactly the later ones.
  */
+let chain: Promise<unknown> = Promise.resolve()
+
+function enqueue<T>(request: () => Promise<T>): Promise<T> {
+  const run = chain.then(request)
+  chain = run.catch(() => undefined)
+  return run
+}
+
 const withPending = (base: Settings): Settings =>
-  pending
-    .filter((entry) => entry.seq > savedSeq)
-    .reduce((acc, entry) => mergeSettings(acc, entry.patch), base)
+  pending.reduce((acc, entry) => mergeSettings(acc, entry.patch), base)
 
 export const useSettingsStore = create<SettingsStore>((set, get) => {
   /** Records a backend response from request `seq` and re-applies the unsaved patches. */
@@ -80,7 +86,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => {
       const seq = ++requestSeq
       set({ status: "loading", loadError: null })
       try {
-        const settings = await settingsApi.get()
+        const settings = await enqueue(settingsApi.get)
         accept(seq, settings)
         if (token === loadToken) set({ status: "ready" })
       } catch (raw) {
@@ -109,7 +115,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => {
       pending = [...pending, { seq, patch }]
       set({ settings: next })
       try {
-        const saved = await settingsApi.set(patch)
+        const saved = await enqueue(() => settingsApi.set(patch))
         dropPending(seq)
         accept(seq, saved)
         return true
@@ -156,6 +162,7 @@ export function resetSettingsStore(): void {
   savedSeq = 0
   loadToken = 0
   pending = []
+  chain = Promise.resolve()
   useSettingsStore.setState({
     settings: DEFAULT_SETTINGS,
     saved: DEFAULT_SETTINGS,

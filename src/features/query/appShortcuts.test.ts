@@ -7,13 +7,8 @@ import { isMac, type KeyLike } from "../../lib/shortcuts"
 import { applyUiZoom, resetSettingsStore, useSettingsStore } from "../../state/settingsStore"
 import { useTabsStore } from "../../state/tabsStore"
 import { useUiStore } from "../../state/uiStore"
-import {
-  handleAppShortcut,
-  isZoomShortcut,
-  matchAppShortcut,
-  resetZoomShortcut,
-  ZOOM_SAVE_DELAY_MS,
-} from "./appShortcuts"
+import { resetUiZoom, ZOOM_SAVE_DELAY_MS } from "../../state/uiZoom"
+import { handleAppShortcut, isZoomShortcut, matchAppShortcut } from "./appShortcuts"
 
 // The webview zoom needs the desktop shell; the tests only check which levels were applied.
 vi.mock("../../state/settingsStore", async (importOriginal) => ({
@@ -115,7 +110,7 @@ describe("zoom shortcuts", () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.mocked(applyUiZoom).mockClear()
-    resetZoomShortcut()
+    resetUiZoom()
     resetSettingsStore()
     useSettingsStore.setState({ status: "ready" })
     saved = []

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, type CSSProperties } from "react"
+import { useEffect, useState, type CSSProperties } from "react"
 import {
   ConnectionDialog,
   HostKeyPromptDialog,
@@ -18,11 +18,12 @@ import { SettingsDialog } from "../../features/settings"
 import { useConnectionsStore } from "../../state/connectionsStore"
 import { ensureQueryOutputSync } from "../../state/queryOutputSync"
 import { subscribeSessionEvents } from "../../state/sessionsStore"
-import { applyEditorFontSize, applyUiZoom, useSettingsStore } from "../../state/settingsStore"
+import { applyEditorFontSize, useSettingsStore } from "../../state/settingsStore"
 import { useTabsStore } from "../../state/tabsStore"
 import { applyTheme, useUiStore } from "../../state/uiStore"
+import { startUiZoomSync } from "../../state/uiZoom"
 import { startWorkspaceSync } from "../../state/workspaceSync"
-import { PANEL_SPECS } from "../../lib/panelWidths"
+import { PANEL_SPECS, panelColumn } from "../../lib/panelWidths"
 import { isImeComposing } from "../../lib/shortcuts"
 import { isModalOpen, ResizeHandle, Toaster } from "../ui"
 import { ConnectionBanner } from "./ConnectionBanner"
@@ -35,7 +36,6 @@ import "./shell.css"
 export function Shell() {
   const theme = useSettingsStore((s) => s.settings.theme)
   const editorFontSize = useSettingsStore((s) => s.settings.editorFontSize)
-  const uiZoom = useSettingsStore((s) => s.settings.uiZoom)
   const settingsReady = useSettingsStore((s) => s.status === "ready")
   const collapsed = useUiStore((s) => s.sidebarCollapsed)
   const sidebarWidth = useUiStore((s) => s.panelWidths.sidebar)
@@ -53,11 +53,8 @@ export function Shell() {
   useEffect(() => applyEditorFontSize(editorFontSize), [editorFontSize])
 
   // Waits for the saved settings: the defaults in use until then would undo the zoom the backend
-  // already applied at startup. A layout effect, so `--ui-zoom` is set before the sidebar toggle
-  // that first renders with it paints.
-  useLayoutEffect(() => {
-    if (settingsReady) applyUiZoom(uiZoom)
-  }, [settingsReady, uiZoom])
+  // already applied at startup.
+  useEffect(() => startUiZoomSync(), [])
 
   // App-wide subscriptions and listeners live here, mounted once for the whole window.
   useNewConnectionShortcut()
@@ -95,7 +92,9 @@ export function Shell() {
       className="shell"
       data-sidebar={collapsed ? "collapsed" : "open"}
       data-resizing={resizing || undefined}
-      style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+      style={
+        { "--sidebar-column": panelColumn(PANEL_SPECS.sidebar, sidebarWidth) } as CSSProperties
+      }
     >
       <Sidebar onAddConnection={() => openDialog()} inert={collapsed} />
       {/* Placed by `--ui-zoom`, which is only known once the saved settings have loaded. */}

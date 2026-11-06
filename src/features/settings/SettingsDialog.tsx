@@ -5,6 +5,7 @@ import { formatShortcut } from "../../lib/shortcuts"
 import { formatZoom, nearestZoomLevel, ZOOM_LEVELS, ZOOM_SHORTCUTS } from "../../lib/zoom"
 import { useSettingsStore } from "../../state/settingsStore"
 import { useUiStore } from "../../state/uiStore"
+import { setUiZoom } from "../../state/uiZoom"
 import { NumberSetting } from "./NumberSetting"
 import { ToggleSetting } from "./ToggleSetting"
 import "./settings.css"
@@ -91,7 +92,7 @@ function SettingsForm() {
             label="Zoom"
             value={String(nearestZoomLevel(settings.uiZoom))}
             options={ZOOM_OPTIONS}
-            onChange={(level) => save({ uiZoom: Number(level) })}
+            onChange={(level) => void setUiZoom(Number(level))}
           />
           <p className="ui-field__hint">{ZOOM_HINT}</p>
         </div>

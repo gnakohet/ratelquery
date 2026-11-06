@@ -1,7 +1,6 @@
-/* The sidebar column is capped at a share of the window, so at a high zoom a wide sidebar can't
-   squeeze the workspace out; the stored width stays as set. */
+/* `--sidebar-column` (set inline) caps the stored width at a share of the window, so at a high
+   zoom a wide sidebar can't squeeze the workspace out. */
 .shell {
-  --sidebar-column: min(var(--sidebar-width), 35%);
   position: relative;
   display: grid;
   grid-template-columns: var(--sidebar-column) 1fr;

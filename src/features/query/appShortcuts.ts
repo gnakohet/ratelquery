@@ -1,10 +1,10 @@
 import { dismissToast, showToast } from "../../components/ui"
 import { matchesShortcut, parseShortcut, type KeyLike, type Shortcut } from "../../lib/shortcuts"
 import { SLOT_COUNT } from "../../lib/tabGroups"
-import { formatZoom, stepZoom, ZOOM_SHORTCUTS, type ZoomAction } from "../../lib/zoom"
-import { applyUiZoom, useSettingsStore } from "../../state/settingsStore"
+import { formatZoom, ZOOM_SHORTCUTS, type ZoomAction } from "../../lib/zoom"
 import { selectActiveTab, useTabsStore } from "../../state/tabsStore"
 import { useUiStore } from "../../state/uiStore"
+import { stepUiZoom } from "../../state/uiZoom"
 import { reviewActiveEdit, runActiveDynamo } from "../dynamo/actions"
 import { applyActiveEdits, closeActiveTab, newTabFromActive, runActiveTab } from "./actions"
 
@@ -115,45 +115,11 @@ export function matchAppShortcut(event: KeyLike): AppShortcut | null {
 /** The toast showing the current zoom; replaced on each step so presses don't pile up. */
 let zoomToastId: number | null = null
 
-/**
- * Presses apply at once but save once, this long after the last: separate saves can finish out
- * of order in the backend and leave the file at an older level.
- */
-export const ZOOM_SAVE_DELAY_MS = 300
-
-/** The level applied but not saved yet, which the next press steps from. */
-let unsavedZoom: number | null = null
-let zoomSaveTimer: ReturnType<typeof setTimeout> | null = null
-
-function saveZoom(): void {
-  zoomSaveTimer = null
-  const level = unsavedZoom
-  unsavedZoom = null
-  const { settings, update } = useSettingsStore.getState()
-  if (level !== null && level !== settings.uiZoom) void update({ uiZoom: level })
-}
-
 function runZoom(action: ZoomAction): void {
-  const { settings, status } = useSettingsStore.getState()
-  // Until the saved level has loaded, stepping would start from the default.
-  if (status !== "ready") return
-  const current = unsavedZoom ?? settings.uiZoom
-  const next = stepZoom(current, action)
+  const level = stepUiZoom(action)
+  if (level === null) return
   if (zoomToastId !== null) dismissToast(zoomToastId)
-  zoomToastId = showToast({ tone: "info", message: `Zoom ${formatZoom(next)}` })
-  if (next === current) return
-  unsavedZoom = next
-  applyUiZoom(next)
-  if (zoomSaveTimer !== null) clearTimeout(zoomSaveTimer)
-  zoomSaveTimer = setTimeout(saveZoom, ZOOM_SAVE_DELAY_MS)
-}
-
-/** Test seam: drops an unsaved zoom and its timer. */
-export function resetZoomShortcut(): void {
-  if (zoomSaveTimer !== null) clearTimeout(zoomSaveTimer)
-  zoomSaveTimer = null
-  unsavedZoom = null
-  zoomToastId = null
+  zoomToastId = showToast({ tone: "info", message: `Zoom ${formatZoom(level)}` })
 }
 
 function runAppShortcut(action: AppShortcut, context: ShortcutContext): void {
