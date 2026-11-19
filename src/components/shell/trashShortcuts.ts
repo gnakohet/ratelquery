@@ -5,8 +5,8 @@ export type TrashShortcutDecision = "close-trash" | "ignore" | "pass"
 
 /**
  * Mod+W closes the Trash instead of a tab. Shortcuts that act on the active tab (run, apply,
- * new tab, close the connection, reveal in the sidebar, tab and connection slots) are ignored, since that tab isn't
- * on screen. The sidebar and Settings shortcuts work as usual.
+ * new tab, close the connection, reveal in the sidebar, tab and connection slots) are ignored,
+ * since that tab isn't on screen. The sidebar and Settings shortcuts work as usual.
  */
 export function trashShortcutDecision(shortcut: AppShortcut | null): TrashShortcutDecision {
   if (shortcut === null) return "pass"
