@@ -150,6 +150,27 @@ describe("running DELETE statements with a trash backup", () => {
     ])
   })
 
+  it("moves the Database picker after a USE, both before a stop and in the continued part", async () => {
+    const script = "use app_test;\nDELETE FROM big WHERE id > 0;\nuse app"
+    plan = [{ index: 1, backup: "ok", reason: null, statement: "DELETE FROM big WHERE id > 0" }]
+    responses = [
+      [exec("use app_test"), stopAt(1, "tok")],
+      [exec("DELETE FROM big WHERE id > 0"), exec("use app")],
+    ]
+    useTabsStore.getState().setSql(tab().id, script)
+    const done = runActiveTab("selection", { selectedText: "" })
+    await waitForQuestion("stopped")
+    // The statements before the stop ran, so the picker already follows their USE.
+    expect(tab().database).toBe("app_test")
+    answerDeleteBackup(true)
+    await done
+    // The continued run stays on the kept connection, in the run's first database...
+    expect(queries()[1].args?.options).toMatchObject({ database: "app", resumeToken: "tok" })
+    // ...the DELETE ran in app_test, and the last USE moves the picker back.
+    expect(tab().resultDatabases).toEqual(["app", "app_test", "app_test"])
+    expect(tab().database).toBe("app")
+  })
+
   it("stops for good when the user declines to go on", async () => {
     responses = [
       [

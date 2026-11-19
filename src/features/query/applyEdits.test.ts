@@ -54,6 +54,7 @@ const schema: SchemaSnapshot = {
 
 let calls: { command: string; args?: Record<string, unknown> }[] = []
 let backupFails = false
+let queryResults: unknown[] = [users]
 let restore: () => void = () => {}
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -61,6 +62,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 beforeEach(() => {
   calls = []
   backupFails = false
+  queryResults = [users]
   useToastStore.setState({ toasts: [] })
   useApplyConfirmStore.setState({ pending: null })
   useTabsStore.setState({ ...INITIAL_TABS })
@@ -79,7 +81,7 @@ beforeEach(() => {
     calls.push({ command, args })
     switch (command) {
       case "mysql_query":
-        return [users]
+        return queryResults
       case "mysql_preview_changes":
         return { statements: ["DELETE FROM `app`.`users` WHERE `id` <=> 2 LIMIT 2"], warning: null }
       case "mysql_apply_changes":
@@ -124,6 +126,44 @@ async function waitForDialog(kind: "apply" | "backup-failed") {
 }
 
 describe("applyActiveEdits", () => {
+  it("previews and applies rows read after a USE in the database it switched to", async () => {
+    const use = {
+      ...users,
+      kind: "exec",
+      affectedRows: 0,
+      lastInsertId: null,
+      statement: "use app_test",
+    }
+    const sessions = useSessionsStore.getState().sessions
+    useSessionsStore.setState({
+      sessions: {
+        c1: {
+          ...sessions.c1,
+          databases: ["app", "app_test"],
+          schemas: { app: schema, app_test: { ...schema, database: "app_test" } },
+        },
+      },
+    })
+    queryResults = [use, users]
+    const id = useTabsStore.getState().open("c1", "app")
+    await useTabsStore.getState().run(id, `use app_test; ${users.statement}`)
+    useTabsStore.getState().updateEdits(id, 1, deleteRow2)
+    calls = []
+    const done = applyActiveEdits()
+    await waitForDialog("apply")
+    expect(useApplyConfirmStore.getState().pending).toMatchObject({
+      request: { table: "app_test.users" },
+    })
+    expect(calls.find((c) => c.command === "mysql_preview_changes")?.args).toMatchObject({
+      database: "app_test",
+      table: "users",
+    })
+    answerApplyConfirm(true)
+    await done
+    expect(applies()).toHaveLength(1)
+    expect(applies()[0].args).toMatchObject({ database: "app_test", table: "users" })
+  })
+
   it("asks first for deletes, shows the preview and applies on confirm", async () => {
     await tabWith(deleteRow2)
     const done = applyActiveEdits()
