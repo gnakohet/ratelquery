@@ -23,6 +23,7 @@ import {
 import { sqlInsertion } from "../../lib/queryOutput"
 import {
   hasUnsavedWork,
+  resultDatabase,
   tabPendingCount,
   tabsForConnection,
   type QueryTab,
@@ -501,7 +502,9 @@ function activeApplyJob(): ApplyJob | null {
   const result = tab.results[index]
   const edits = tab.edits[index]
   const session = useSessionsStore.getState().sessions[tab.connectionId]
-  const resolved = editTargetFor(tab, result, session)
+  // A `USE` earlier in the run can mean this result was read in another database.
+  const ranDatabase = resultDatabase(tab, index)
+  const resolved = editTargetFor({ ranDatabase, engine: tab.engine }, result, session)
   if (!resolved.editable || !edits || result?.kind !== "rows") return null
   const changes = buildRowChanges(edits, resolved.target, result.rows)
   if (changes.length === 0) return null
