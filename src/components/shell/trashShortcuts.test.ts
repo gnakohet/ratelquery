@@ -10,6 +10,8 @@ describe("trashShortcutDecision", () => {
       "apply",
       "newTab",
       "closeConnection",
+      // The active tab isn't on screen, so there is nothing to reveal.
+      "revealInSidebar",
     ] as const) {
       expect(trashShortcutDecision(tabShortcut)).toBe("ignore")
     }

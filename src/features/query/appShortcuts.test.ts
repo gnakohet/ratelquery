@@ -40,6 +40,21 @@ describe("handleAppShortcut", () => {
     expect(useUiStore.getState().settingsOpen).toBe(true)
   })
 
+  it("matches Mod+Shift+E to reveal in sidebar by physical key", () => {
+    expect(matchAppShortcut(modKey("KeyE", { shiftKey: true }))).toBe("revealInSidebar")
+    expect(matchAppShortcut(modKey("KeyE"))).toBeNull()
+    expect(
+      matchAppShortcut({ ...modKey("KeyE", { shiftKey: true }), metaKey: false, ctrlKey: false }),
+    ).toBeNull()
+  })
+
+  it("claims Mod+Shift+E without an active tab and leaves the sidebar as it is", () => {
+    useUiStore.setState({ sidebarCollapsed: true })
+    expect(handleAppShortcut(modKey("KeyE", { shiftKey: true }))).toBe(true)
+    expect(useUiStore.getState().sidebarCollapsed).toBe(true)
+    useUiStore.setState({ sidebarCollapsed: false })
+  })
+
   it("closes the active tab on Mod+W and the active connection's tabs on Mod+Shift+W", () => {
     const store = useTabsStore.getState()
     const a1 = store.open("a", null)
