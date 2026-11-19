@@ -78,8 +78,9 @@ pub fn run() {
             legacy_config::migrate(&config_dir);
             let sink = Arc::new(TauriStateSink::new(app.handle().clone()));
             let state = AppState::new(&config_dir, Arc::new(KeyringSecretStore), sink);
-            start_trash(&state);
+            // Zoom first: it only touches the window, and trash recovery can take a while.
             apply_saved_zoom(app.handle(), &state);
+            start_trash(&state);
             app.manage(state);
             Ok(())
         })
