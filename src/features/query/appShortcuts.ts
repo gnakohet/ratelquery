@@ -3,6 +3,7 @@ import { SLOT_COUNT } from "../../lib/tabGroups"
 import { selectActiveTab, useTabsStore } from "../../state/tabsStore"
 import { useUiStore } from "../../state/uiStore"
 import { reviewActiveEdit, runActiveDynamo } from "../dynamo/actions"
+import { revealActiveTab } from "../schema/reveal"
 import {
   applyActiveEdits,
   closeActiveConnection,
@@ -23,6 +24,8 @@ export const APP_SHORTCUTS = {
   runSelection: parseShortcut("Mod+Shift+Enter"),
   apply: parseShortcut("Mod+S"),
   toggleSidebar: parseShortcut("Mod+B"),
+  /** The active tab's connection, database or table in the sidebar, focused. */
+  revealInSidebar: parseShortcut("Mod+Shift+E"),
   settings: parseShortcut("Mod+,"),
 } as const
 
@@ -91,6 +94,7 @@ export function matchAppShortcut(event: KeyLike): AppShortcut | null {
     "closeTab",
     "apply",
     "toggleSidebar",
+    "revealInSidebar",
     "settings",
   ]
   return order.find((name) => matchesShortcut(event, APP_SHORTCUTS[name])) ?? null
@@ -128,6 +132,9 @@ function runAppShortcut(action: AppShortcut, context: ShortcutContext): void {
       return
     case "toggleSidebar":
       useUiStore.getState().toggleSidebar()
+      return
+    case "revealInSidebar":
+      revealActiveTab()
       return
     case "settings":
       useUiStore.getState().openSettings()

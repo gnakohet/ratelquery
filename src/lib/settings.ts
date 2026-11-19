@@ -32,6 +32,8 @@ export interface Settings {
   query: QuerySettings
   dynamo: DynamoSettings
   secretStore: SecretStore
+  /** Expand the sidebar to the active tab's connection, database or table as tabs change. */
+  revealActiveTab: boolean
 }
 
 /** Partial update: top-level fields, or some fields of one group. */
@@ -41,6 +43,7 @@ export interface SettingsPatch {
   query?: Partial<QuerySettings>
   dynamo?: Partial<DynamoSettings>
   secretStore?: SecretStore
+  revealActiveTab?: boolean
 }
 
 export interface Range {
@@ -73,6 +76,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   dynamo: { pageSize: 100 },
   secretStore: "keychain",
+  revealActiveTab: false,
 }
 
 export const THEME_PREFERENCES = ["system", "light", "dark"] as const
@@ -94,6 +98,7 @@ export const settingsSchema = z.object({
   }),
   dynamo: z.object({ pageSize: intIn(SETTING_RANGES.pageSize) }),
   secretStore: z.enum(SECRET_STORES),
+  revealActiveTab: z.boolean(),
 })
 
 const D = DEFAULT_SETTINGS
@@ -120,6 +125,7 @@ const lenientSchema = z.object({
     .object({ pageSize: intIn(SETTING_RANGES.pageSize).catch(D.dynamo.pageSize) })
     .catch(D.dynamo),
   secretStore: z.enum(SECRET_STORES).catch(D.secretStore),
+  revealActiveTab: z.boolean().catch(D.revealActiveTab),
 })
 
 /** Reads settings from untrusted data (the IPC response), defaulting whatever is unusable. */
@@ -135,6 +141,7 @@ export function mergeSettings(base: Settings, patch: SettingsPatch): Settings {
     ...(patch.theme !== undefined ? { theme: patch.theme } : {}),
     ...(patch.editorFontSize !== undefined ? { editorFontSize: patch.editorFontSize } : {}),
     ...(patch.secretStore !== undefined ? { secretStore: patch.secretStore } : {}),
+    ...(patch.revealActiveTab !== undefined ? { revealActiveTab: patch.revealActiveTab } : {}),
     query: { ...base.query, ...patch.query },
     dynamo: { ...base.dynamo, ...patch.dynamo },
   }
