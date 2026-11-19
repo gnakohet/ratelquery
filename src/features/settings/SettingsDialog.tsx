@@ -4,6 +4,7 @@ import type { SecretStore, SettingsPatch, ThemePreference } from "../../lib/sett
 import { formatShortcut } from "../../lib/shortcuts"
 import { formatZoom, nearestZoomLevel, ZOOM_LEVELS, ZOOM_SHORTCUTS } from "../../lib/zoom"
 import { useSettingsStore } from "../../state/settingsStore"
+import { refreshTrash } from "../../state/trashStore"
 import { useUiStore } from "../../state/uiStore"
 import { setUiZoom } from "../../state/uiZoom"
 import { NumberSetting } from "./NumberSetting"
@@ -136,6 +137,16 @@ function SettingsForm() {
           hint="The Output log, including the SQL text you ran, is saved on this computer. 0 keeps it until the app quits; up to 365."
           value={query.outputRetentionDays}
           onCommit={(outputRetentionDays) => save({ query: { outputRetentionDays } })}
+        />
+        <NumberSetting
+          field="trashRetentionDays"
+          label="Empty trash after (days)"
+          hint="Deleted rows are kept in the Trash on this computer, unencrypted, for this many days; 1 to 365."
+          value={query.trashRetentionDays}
+          onCommit={(trashRetentionDays) =>
+            // The backend purges on a changed retention; show the result.
+            void update({ query: { trashRetentionDays } }).then(refreshTrash)
+          }
         />
       </Section>
       <Section title="DynamoDB">
